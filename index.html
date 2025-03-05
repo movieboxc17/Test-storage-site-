@@ -5,10 +5,616 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>System Resource Dashboard</title>
     <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
-    <link rel="stylesheet" href="styles.css">
+    <style>
+        /* Styles from styles.css */
+        .dashboard-grid {
+          display: grid;
+          grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+          gap: 1.5rem;
+        }
+
+        .widget-card {
+          transition: all 0.3s ease;
+        }
+
+        .widget-card:hover {
+          transform: translateY(-5px);
+          box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+        }
+
+        .animate-pulse-slow {
+          animation: pulse 4s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+        }
+
+        @keyframes pulse {
+          0%, 100% {
+            opacity: 1;
+          }
+          50% {
+            opacity: 0.7;
+          }
+        }
+
+        .chart-container {
+          height: 200px;
+          position: relative;
+        }
+
+        .cpu-bar {
+          transition: height 0.5s ease;
+          border-radius: 3px 3px 0 0;
+          width: 20px;
+        }
+
+        .cpu-grid {
+          display: grid;
+          grid-template-columns: repeat(12, 1fr);
+          gap: 8px;
+          align-items: end;
+          height: 100%;
+        }
+
+        .notification-badge {
+          position: absolute;
+          top: -8px;
+          right: -8px;
+          animation: pulse 2s infinite;
+        }
+    </style>
+    <script>
+        // Initialize dark mode based on user preference
+        if (localStorage.theme === 'dark' || (!('theme' in localStorage) && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+            document.documentElement.classList.add('dark')
+        } else {
+            document.documentElement.classList.remove('dark')
+        }
+    </script>
 </head>
 <body class="bg-gray-100 text-gray-900 dark:bg-gray-900 dark:text-gray-100 transition">
     <div id="root"></div>
-    <script type="module" src="app.js"></script>
+    
+    <!-- Add a loading indicator that will disappear when app loads -->
+    <div id="loading" class="fixed inset-0 flex items-center justify-center bg-gray-100 dark:bg-gray-900 z-50">
+        <div class="text-center">
+            <div class="w-16 h-16 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto"></div>
+            <p class="mt-4 text-gray-700 dark:text-gray-300">Loading dashboard...</p>
+        </div>
+    </div>
+    
+    <!-- All JavaScript included directly in the HTML -->
+    <script type="module">
+        import React, { StrictMode, useEffect, useRef, useState } from "https://esm.sh/react";
+        import { createRoot } from "https://esm.sh/react-dom/client";
+
+        // Hide loading indicator when app starts executing
+        window.addEventListener('DOMContentLoaded', () => {
+            setTimeout(() => {
+                const loadingElement = document.getElementById('loading');
+                if (loadingElement) {
+                    loadingElement.style.opacity = '0';
+                    loadingElement.style.transition = 'opacity 0.5s ease';
+                    setTimeout(() => {
+                        loadingElement.style.display = 'none';
+                    }, 500);
+                }
+            }, 300);
+        });
+
+        function fakeData() {
+          const KB = 1024;
+          const MB = KB * 1024;
+          const GB = MB * 1024;
+          const maxMemory = 64 * GB;
+          const randomIDAndMemory = () => ({
+            id: crypto.randomUUID(),
+            memory: Math.round(maxMemory * (Utils.randomFloat(0.1,0.33)))
+          });
+
+          return {
+            maxMemory,
+            data: [
+              {
+                ...randomIDAndMemory(),
+                name: "Regular",
+                color: "cyan"
+              },
+              {
+                ...randomIDAndMemory(),
+                name: "System",
+                color: "red"
+              },
+              {
+                ...randomIDAndMemory(),
+                name: "Shared",
+                color: "yellow"
+              }
+            ]
+          };
+        }
+
+        function Icon({ icon }) {
+          return (
+            <svg className="w-4 h-4" width="16px" height="16px" aria-hidden="true">
+              <use href={`#${icon}`} />
+            </svg>
+          );
+        }
+
+        function IconSprites() {
+          const viewBox = "0 0 16 16";
+
+          return (
+            <svg width="0" height="0" display="none">
+              <symbol id="upgrade" viewBox={viewBox}>
+                <g fill="none" stroke="currentcolor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2">
+                  <circle r="7" cx="8" cy="8" />
+                  <polyline points="5 8,8 5,11 8" />
+                  <polyline points="8 5,8 11" />
+                </g>
+              </symbol>
+              <symbol id="sun" viewBox={viewBox}>
+                <circle cx="8" cy="8" r="4" fill="none" stroke="currentColor" strokeWidth="2"/>
+                <line x1="8" y1="1" x2="8" y2="3" stroke="currentColor" strokeWidth="2"/>
+                <line x1="8" y1="13" x2="8" y2="15" stroke="currentColor" strokeWidth="2"/>
+                <line x1="1" y1="8" x2="3" y2="8" stroke="currentColor" strokeWidth="2"/>
+                <line x1="13" y1="8" x2="15" y2="8" stroke="currentColor" strokeWidth="2"/>
+              </symbol>
+              <symbol id="moon" viewBox={viewBox}>
+                <path d="M10.5 1.5C7.5 1.5 5 4 5 7C5 10 7.5 12.5 10.5 12.5C10.67 12.5 10.84 12.49 11 12.47C9.22 11.32 8 9.29 8 7C8 4.71 9.22 2.68 11 1.53C10.84 1.51 10.67 1.5 10.5 1.5Z" fill="currentColor"/>
+              </symbol>
+              <symbol id="alert" viewBox={viewBox}>
+                <path d="M8 1.5C4.41 1.5 1.5 4.41 1.5 8C1.5 11.59 4.41 14.5 8 14.5C11.59 14.5 14.5 11.59 14.5 8C14.5 4.41 11.59 1.5 8 1.5ZM8 11.5C7.59 11.5 7.25 11.16 7.25 10.75C7.25 10.34 7.59 10 8 10C8.41 10 8.75 10.34 8.75 10.75C8.75 11.16 8.41 11.5 8 11.5ZM8.5 8.5H7.5V5H8.5V8.5Z" fill="currentColor"/>
+              </symbol>
+            </svg>
+          );
+        }
+
+        function ThemeToggle() {
+          const [darkMode, setDarkMode] = useState(() => {
+            if (typeof window !== 'undefined') {
+              return document.documentElement.classList.contains('dark') ||
+                window.matchMedia('(prefers-color-scheme: dark)').matches;
+            }
+            return false;
+          });
+
+          useEffect(() => {
+            if (darkMode) {
+              document.documentElement.classList.add('dark');
+              localStorage.theme = 'dark';
+            } else {
+              document.documentElement.classList.remove('dark');
+              localStorage.theme = 'light';
+            }
+          }, [darkMode]);
+
+          return (
+            <button
+              onClick={() => setDarkMode(!darkMode)}
+              className="p-2 rounded-full bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 transition-colors hover:bg-gray-300 dark:hover:bg-gray-600"
+              aria-label={darkMode ? "Switch to light mode" : "Switch to dark mode"}
+            >
+              <Icon icon={darkMode ? "sun" : "moon"} />
+            </button>
+          );
+        }
+
+        function CPUWidget() {
+          const [cpuUsage, setCpuUsage] = useState([]);
+          
+          useEffect(() => {
+            // Simulate CPU usage data - replace with real API in production
+            function generateData() {
+              const newData = Array(12).fill().map(() => Math.random() * 100);
+              setCpuUsage(newData);
+            }
+            
+            generateData();
+            const interval = setInterval(generateData, 3000);
+            return () => clearInterval(interval);
+          }, []);
+          
+          return (
+            <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-xl p-5 transition widget-card">
+              <div className="flex justify-between items-center mb-4">
+                <h3 className="font-semibold text-lg">CPU Usage</h3>
+                <div className="text-sm text-gray-500 dark:text-gray-400">
+                  Updated just now
+                </div>
+              </div>
+              
+              <div className="chart-container">
+                <div className="cpu-grid h-full">
+                  {cpuUsage.map((usage, index) => (
+                    <div key={index} className="flex flex-col items-center justify-end h-full">
+                      <div 
+                        className="cpu-bar bg-blue-500 dark:bg-blue-400" 
+                        style={{ height: `${usage}%` }}
+                      ></div>
+                      <div className="text-xs mt-1">{index + 1}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          );
+        }
+
+        function NetworkWidget() {
+          const [networkData, setNetworkData] = useState({
+            download: 0,
+            upload: 0,
+            connections: 0
+          });
+          
+          useEffect(() => {
+            function generateData() {
+              setNetworkData({
+                download: Math.round(Math.random() * 100 * 100) / 100,
+                upload: Math.round(Math.random() * 40 * 100) / 100,
+                connections: Math.floor(Math.random() * 100)
+              });
+            }
+            
+            generateData();
+            const interval = setInterval(generateData, 5000);
+            return () => clearInterval(interval);
+          }, []);
+          
+          return (
+            <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-xl p-5 transition widget-card">
+              <div className="flex justify-between items-center mb-4">
+                <h3 className="font-semibold text-lg">Network</h3>
+                <span className="animate-pulse-slow px-2 py-1 rounded-full text-xs bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300">
+                  Active
+                </span>
+              </div>
+              
+              <div className="grid grid-cols-3 gap-4">
+                <div className="text-center p-3 bg-gray-50 dark:bg-gray-700 rounded-lg">
+                  <div className="text-2xl font-bold text-blue-500">{networkData.download}</div>
+                  <div className="text-sm text-gray-500 dark:text-gray-400">MB/s Down</div>
+                </div>
+                
+                <div className="text-center p-3 bg-gray-50 dark:bg-gray-700 rounded-lg">
+                  <div className="text-2xl font-bold text-green-500">{networkData.upload}</div>
+                  <div className="text-sm text-gray-500 dark:text-gray-400">MB/s Up</div>
+                </div>
+                
+                <div className="text-center p-3 bg-gray-50 dark:bg-gray-700 rounded-lg">
+                  <div className="text-2xl font-bold text-purple-500">{networkData.connections}</div>
+                  <div className="text-sm text-gray-500 dark:text-gray-400">Connections</div>
+                </div>
+              </div>
+            </div>
+          );
+        }
+
+        function AlertWidget() {
+          return (
+            <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-xl p-5 transition widget-card">
+              <div className="flex justify-between items-center mb-4">
+                <h3 className="font-semibold text-lg">System Alerts</h3>
+                <div className="relative">
+                  <Icon icon="alert" />
+                  <span className="notification-badge absolute w-3 h-3 bg-red-500 rounded-full"></span>
+                </div>
+              </div>
+              
+              <div className="space-y-3">
+                <div className="p-3 bg-yellow-50 dark:bg-yellow-900/30 border-l-4 border-yellow-500 text-yellow-800 dark:text-yellow-200 text-sm rounded">
+                  <div className="font-medium">Low Disk Space Warning</div>
+                  <div className="text-xs text-yellow-700 dark:text-yellow-300 mt-1">System drive (C:) has less than 15% free space remaining</div>
+                </div>
+                
+                <div className="p-3 bg-blue-50 dark:bg-blue-900/30 border-l-4 border-blue-500 text-blue-800 dark:text-blue-200 text-sm rounded">
+                  <div className="font-medium">Update Available</div>
+                  <div className="text-xs text-blue-700 dark:text-blue-300 mt-1">System update v2.5.1 is ready to install</div>
+                </div>
+              </div>
+            </div>
+          );
+        }
+
+        function Dashboard() {
+          const [storageData, setStorageData] = useState(() => [fakeData(), fakeData()]);
+          
+          useEffect(() => {
+            // Periodically update storage data
+            const interval = setInterval(() => {
+              setStorageData([fakeData(), fakeData()]);
+            }, 15000);
+            
+            return () => clearInterval(interval);
+          }, []);
+          
+          return (
+            <div className="container mx-auto p-4">
+              <header className="flex justify-between items-center mb-8 p-4 bg-white dark:bg-gray-800 rounded-xl shadow-lg">
+                <h1 className="text-2xl font-bold">System Resource Dashboard</h1>
+                <ThemeToggle />
+              </header>
+              
+              <div className="dashboard-grid">
+                <StorageWidget {...storageData[0]} />
+                <CPUWidget />
+                <NetworkWidget />
+                <StorageWidget {...storageData[1]} />
+                <AlertWidget />
+              </div>
+              
+              <footer className="mt-8 text-center text-sm text-gray-500 dark:text-gray-400">
+                <p>Live system monitoring dashboard - Data refreshes automatically</p>
+                <p className="mt-2">Last updated: {new Date().toLocaleTimeString()}</p>
+              </footer>
+            </div>
+          );
+        }
+
+        // All the storage widget components from your original code
+        function StorageWidget({ maxMemory = 0, data = [] }) {
+          let memoryUsed = 0;
+
+          for (let cat of data) {
+            memoryUsed += cat.memory;
+          }
+
+          const cats = [
+            ...data,
+            {
+              id: "0",
+              name: "Free",
+              memory: maxMemory - memoryUsed
+            }
+          ];
+          const memoryOnly = cats.map(cat => cat.memory);
+          const memoryCompounded = [];
+
+          for (let i = 0; i < memoryOnly.length; ++i) {
+            // create an array where each value is a total of the previous values; this is needed for the bar position animations
+            memoryCompounded.push(memoryOnly.slice(0,i + 1).reduce((a,b) => a + b));
+          }
+
+          return (
+            <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-xl px-5 py-5 transition widget-card">
+              <StorageWidgetHeader />
+              <StorageWidgetTotal used={memoryUsed} max={maxMemory} />
+              <StorageWidgetBarGraph>
+                {
+                  cats.map((cat,i) => {
+                    const percentCurrent = cat.memory / maxMemory;
+                    // use the combined previous percents as the offset
+                    const offset = memoryCompounded[i - 1] / maxMemory || 0;
+                    const ariaLabel = `${Utils.formatBytes(cat.memory)} ${cat.name}`;
+                    const forEmpty = i === cats.length - 1;
+
+                    return (
+                      <StorageWidgetBar key={cat.id} color={cat.color} percent={percentCurrent} offset={offset} ariaLabel={ariaLabel} forEmpty={forEmpty} />
+                    );
+                  })
+                }
+              </StorageWidgetBarGraph>
+              <StorageWidgetCategoryList>
+                {cats.map(cat => (
+                  <StorageWidgetCategory key={cat.id} color={cat.color} name={cat.name} memory={cat.memory} />
+                ))}
+              </StorageWidgetCategoryList>
+            </div>
+          );
+        }
+
+        function StorageWidgetBar({ color, percent = 0, offset = 0, forEmpty, ariaLabel }) {
+          const animationRef = useRef(0);
+          const [animated, setAnimated] = useState(false);
+          const barColor = Utils.fillColor(color);
+          const barPercent = percent * 100;
+          const barOffset = offset * 100;
+          const containerStyle = {
+            transform: `translateX(${animated ? 0 : -barOffset}%)`
+          };
+          const containerXPos = forEmpty === true ? "right-0" : "left-0";
+          const barStyle = {
+            opacity: animated || forEmpty === true ? 1 : 0,
+            right: "auto",
+            left: `${barOffset}%`,
+            width: `${barPercent}%`
+          };
+          const borderClass = offset === 0 ? "" : "border-l border-l-2 border-l-white dark:border-l-gray-800";
+
+          if (forEmpty === true) {
+            // for the empty fill, start at 100%, then move outside to the end
+            containerStyle.transform = `translateX(${animated ? `calc(2px + ${barOffset}%)` : 0})`;
+            barStyle.right = "0";
+            barStyle.left = "auto";
+            barStyle.width = "calc(100% + 2px)";
+          }
+
+          useEffect(() => {
+            // allow the animation to run after render
+            animationRef.current = setTimeout(() => setAnimated(true),200);
+
+            return () => {
+              clearTimeout(animationRef.current);
+            };
+          }, []);
+
+          return (
+            <div className="rounded-full absolute inset-0 overflow-hidden rtl:-scale-x-100">
+              <div className={`absolute top-0 ${containerXPos} w-full h-full transition-transform duration-700`} style={containerStyle}>
+                <div className={`${barColor} ${borderClass} absolute top-0 h-full transition-colors`} style={barStyle} aria-label={ariaLabel}></div>
+              </div>
+            </div>
+          );
+        }
+
+        function StorageWidgetBarGraph({ children }) {
+          return (
+            <div className="mb-5 h-5 relative">
+              {children}
+            </div>
+          );
+        }
+
+        function StorageWidgetCategory({ color, name, memory = 0 }) {
+          const catColor = Utils.fillColor(color);
+
+          return (
+            <div className="flex items-center gap-2">
+              <div className={`${catColor} rounded-sm w-4 h-3 transition-colors`}></div>
+              <span className="flex gap-x-1.5">
+                <strong className="font-semibold text-gray-900 dark:text-gray-100 transition-colors">
+                  {name}
+                </strong>
+                <span className="text-gray-600 dark:text-gray-400 transition-colors">
+                  {Utils.formatBytes(memory)}
+                </span>
+              </span>
+            </div>
+          );
+        }
+
+        function StorageWidgetCategoryList({ children }) {
+          return (
+            <div className="flex gap-x-5 gap-y-1 flex-wrap text-sm">
+              {children}
+            </div>
+          );
+        }
+
+        function StorageWidgetHeader() {
+          return (
+            <div className="flex justify-between items-center mb-2">
+              <div className="text-gray-600 dark:text-gray-400 font-semibold truncate transition-colors">Storage</div>
+              <button className="flex items-center gap-1 rounded-full bg-cyan-100 hover:bg-cyan-200 dark:bg-cyan-900 dark:hover:bg-cyan-800 border border-cyan-200 hover:border-cyan-300 dark:border-cyan-800 dark:hover:border-cyan-700 text-cyan-600 dark:text-cyan-400 font-medium text-sm ms-3 px-2 py-0.5 transition-colors" type="button">
+                <Icon icon="upgrade" /> Upgrade
+              </button>
+            </div>
+          );
+        }
+
+        function StorageWidgetTotal({ used, max }) {
+          return (
+            <div className="mb-4">
+              <span className="font-medium text-3xl sm:text-4xl text-gray-900 dark:text-gray-100 transition-colors">
+                {Utils.formatBytes(used)}
+                <sup className="text-gray-600 dark:text-gray-400 ms-3 text-sm sm:text-base -top-4 transition-colors">
+                  of {Utils.formatBytes(max)}
+                </sup>
+              </span>
+            </div>
+          );
+        }
+
+        class Utils {
+          /**
+           * Format a value as bytes.
+           * @param bytes Number of bytes
+           * @param decimals Number of decimal places
+           */
+          static formatBytes(bytes, decimals = 2) {
+            const sizes = ["bytes", "KB", "MB", "GB", "TB", "PB", "EB", "ZB", "YB", "RB", "QB"];
+
+            if (bytes === 0) return `${bytes} ${sizes[0]}`;
+            
+            const KB = 1024;
+            const sizeIndex = Math.floor(Math.log(Math.abs(bytes)) / Math.log(KB));
+            const value = parseFloat((bytes / (KB ** sizeIndex)).toFixed(decimals));
+            const label = sizes[sizeIndex];
+
+            return `${value} ${label}`;
+          }
+          
+          /** Return a random value between 0 and 1. */
+          static random() {
+            return crypto.getRandomValues(new Uint32Array(1))[0] / 2**32;
+          }
+          
+          /**
+           * Return a random value between a given minimum and maximum value.
+           * @param min Minimum value
+           * @param max Maximum value
+           */
+          static randomFloat(min, max) {
+            return min + ((max - min) * this.random());
+          }
+          
+          /**
+           * Get the fill color for a given color name, or get the theme default.
+           * @param color Name of color
+           */
+          static fillColor(color) {
+            const colorKeys = {
+              red: "bg-red-500",
+              yellow: "bg-yellow-500",
+              green: "bg-green-500",
+              cyan: "bg-cyan-500",
+              blue: "bg-blue-500",
+              gray: "bg-gray-500",
+              default: "bg-gray-200 dark:bg-gray-600"
+            };
+
+            return color ? colorKeys[color] : colorKeys["default"];
+          }
+        }
+
+        // Widget interaction functions
+        function enableWidgetDragging() {
+          // Get all widget elements
+          const widgets = document.querySelectorAll('.widget-card');
+          
+          widgets.forEach(widget => {
+            let isDragging = false;
+            let offset = { x: 0, y: 0 };
+            
+            // Set initial positioning for transform
+            widget.style.position = 'relative';
+            widget.style.zIndex = '1';
+            widget.style.cursor = 'grab';
+            
+            widget.addEventListener('mousedown', (e) => {
+              isDragging = true;
+              offset = { 
+                x: e.clientX - widget.getBoundingClientRect().left,
+                y: e.clientY - widget.getBoundingClientRect().top
+              };
+              widget.style.zIndex = '100';
+              widget.style.cursor = 'grabbing';
+            });
+            
+            document.addEventListener('mousemove', (e) => {
+              if (!isDragging) return;
+              
+              const x = e.clientX - offset.x;
+              const y = e.clientY - offset.y;
+              
+              widget.style.position = 'absolute';
+              widget.style.left = `${x}px`;
+              widget.style.top = `${y}px`;
+            });
+            
+            document.addEventListener('mouseup', () => {
+              if (isDragging) {
+                isDragging = false;
+                widget.style.zIndex = '1';
+                widget.style.cursor = 'grab';
+              }
+            });
+          });
+        }
+
+        // Render the main app
+        createRoot(document.getElementById("root")).render(
+          <StrictMode>
+            <IconSprites />
+            <Dashboard />
+          </StrictMode>
+        );
+
+        // Enable extra features after initial render
+        setTimeout(() => {
+          // Uncomment the next line to enable draggable widgets
+          // enableWidgetDragging();
+        }, 2000);
+    </script>
 </body>
 </html>
